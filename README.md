@@ -25,9 +25,7 @@ SGX 程序经常使用两类调用
 
 例如：
 
-普通程序
-   ↓ ECALL
-Enclave 添加一个密码
+<img width="106" height="59" alt="image" src="https://github.com/user-attachments/assets/0aa5cfe7-e414-4658-bbda-64af2d167783" />
 
 示例：
 
@@ -38,6 +36,7 @@ ecall_add_password("github", "alice", "123456");
 ### OCALL：Enclave 请求外部普通程序执行某项操作。
 
 例如，Enclave 自己不能直接保存文件，于是它可以把已经密封好的数据交给普通程序：
+
 <img width="187" height="149" alt="image" src="https://github.com/user-attachments/assets/a3ce2c60-4970-49d8-b00b-45c33b645690" />
 
 
