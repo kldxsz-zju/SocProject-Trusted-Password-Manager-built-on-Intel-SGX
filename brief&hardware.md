@@ -1,3 +1,4 @@
+## brief&hardware requests
 Our proposed project is a secure password vault based on Intel SGX Sealing.
 
 The main idea is to keep plaintext passwords and sensitive keys inside an SGX Enclave, and use Sealing to store the password vault securely on disk. We plan to test normal recovery after restart, file tampering, copying sealed files, software upgrades, and rollback attacks.
