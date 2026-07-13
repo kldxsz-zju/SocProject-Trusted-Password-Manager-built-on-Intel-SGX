@@ -38,22 +38,8 @@ ecall_add_password("github", "alice", "123456");
 ### OCALL：Enclave 请求外部普通程序执行某项操作。
 
 例如，Enclave 自己不能直接保存文件，于是它可以把已经密封好的数据交给普通程序：
+<img width="187" height="149" alt="image" src="https://github.com/user-attachments/assets/a3ce2c60-4970-49d8-b00b-45c33b645690" />
 
-Enclave
-   ↓ OCALL
-普通程序将 sealed blob 写入磁盘
-
-因此整体流程可能是：
-
-用户输入命令
-    ↓
-普通程序通过 ECALL 调用 Enclave
-    ↓
-Enclave 处理密码并完成 Sealing
-    ↓
-密封数据返回普通程序
-    ↓
-普通程序写入 vault.sealed
 
 ## 1. 项目简介
 
