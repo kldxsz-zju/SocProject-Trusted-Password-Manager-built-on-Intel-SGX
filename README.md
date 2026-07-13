@@ -1,5 +1,60 @@
 # SocProject-Trusted-Password-Manager-built-on-Intel-SGX
 
+## 0. 概念介绍
+
+## SGX: Intel Software Guard Extensions
+
+它是 Intel 处理器提供的一种硬件级安全技术，其核心目标是：即使操作系统、管理员权限程序或其他普通程序不可信，也尽量保护一小部分敏感代码和数据不被读取或修改。
+它会在普通程序内部划出一块由 CPU 保护的区域，敏感代码和数据放在这块区域中运行，这个区域即为Enclave。
+
+## Enclave:
+
+相当于是CPU内部的一个保险柜，普通程序可以请求 Enclave 执行某些操作，但是不能随意读取 Enclave 内部的数据。
+
+例如，普通程序可以告诉 Enclave：请帮我检查用户输入的密码是否正确。
+
+Enclave 可以返回：正确/错误
+
+但是普通程序不一定需要得到真正的密码或主密钥。、
+
+## 调用
+
+SGX 程序经常使用两类调用
+
+### ECALL：普通程序调用 Enclave 内部的函数。
+
+例如：
+
+普通程序
+   ↓ ECALL
+Enclave 添加一个密码
+
+示例：
+
+ecall_add_password("github", "alice", "123456");
+
+当然，实际项目中不应该随意让密码在普通程序和 Enclave 之间来回传递，需要仔细设计接口。
+
+### OCALL：Enclave 请求外部普通程序执行某项操作。
+
+例如，Enclave 自己不能直接保存文件，于是它可以把已经密封好的数据交给普通程序：
+
+Enclave
+   ↓ OCALL
+普通程序将 sealed blob 写入磁盘
+
+因此整体流程可能是：
+
+用户输入命令
+    ↓
+普通程序通过 ECALL 调用 Enclave
+    ↓
+Enclave 处理密码并完成 Sealing
+    ↓
+密封数据返回普通程序
+    ↓
+普通程序写入 vault.sealed
+
 ## 1. 项目简介
 
 研究如何利用 Intel SGX Sealing 机制，对密码库中的主密钥、密码条目和关键状态进行安全持久化。
