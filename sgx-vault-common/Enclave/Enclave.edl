@@ -1,0 +1,32 @@
+enclave {
+    include "stdint.h"
+    include "stddef.h"
+
+    trusted {
+        public int ecall_vault_create();
+        public int ecall_vault_clear();
+        public int ecall_vault_add([in, string] const char *service,
+                                   [in, string] const char *username,
+                                   [in, string] const char *password);
+        public int ecall_vault_get([in, string] const char *service,
+                                   [out, size=username_capacity] char *username,
+                                   size_t username_capacity,
+                                   [out, size=password_capacity] char *password,
+                                   size_t password_capacity);
+        public int ecall_vault_update([in, string] const char *service,
+                                      [in, string] const char *username,
+                                      [in, string] const char *password);
+        public int ecall_vault_delete([in, string] const char *service);
+        public int ecall_vault_list([out, size=output_capacity] char *output,
+                                    size_t output_capacity,
+                                    [out] size_t *required_size);
+        public int ecall_vault_get_versions([out] uint32_t *format_version,
+                                            [out] uint64_t *state_version);
+        public int ecall_vault_sealed_size([out] uint32_t *sealed_size);
+        public int ecall_vault_seal([out, size=sealed_capacity] uint8_t *sealed,
+                                    uint32_t sealed_capacity,
+                                    [out] uint32_t *actual_size);
+        public int ecall_vault_unseal([in, size=sealed_size] const uint8_t *sealed,
+                                      uint32_t sealed_size);
+    };
+};

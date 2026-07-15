@@ -1,0 +1,11 @@
+app
+enclave.so
+enclave.signed.so
+Enclave/Enclave_private.pem
+App/Enclave_u.c
+App/Enclave_u.h
+Enclave/Enclave_t.c
+Enclave/Enclave_t.h
+*.o
+*.sealed
+*.tmp

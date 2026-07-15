@@ -1,0 +1,29 @@
+#ifndef SGX_VAULT_TYPES_H
+#define SGX_VAULT_TYPES_H
+
+#include <stdint.h>
+
+/* ECALL 边界两侧共享的公开常量。结构体实体只在 Enclave 内定义。 */
+#define VAULT_FORMAT_VERSION 1u
+#define VAULT_MAX_CREDENTIALS 128u
+#define VAULT_SERVICE_MAX 64u
+#define VAULT_USERNAME_MAX 128u
+#define VAULT_PASSWORD_MAX 256u
+
+typedef enum vault_result_t {
+    VAULT_OK = 0,
+    VAULT_ERR_INVALID_PARAMETER = 1,
+    VAULT_ERR_NOT_INITIALIZED = 2,
+    VAULT_ERR_ALREADY_INITIALIZED = 3,
+    VAULT_ERR_DUPLICATE_SERVICE = 4,
+    VAULT_ERR_NOT_FOUND = 5,
+    VAULT_ERR_FULL = 6,
+    VAULT_ERR_BUFFER_TOO_SMALL = 7,
+    VAULT_ERR_SEAL = 8,
+    VAULT_ERR_UNSEAL = 9,
+    VAULT_ERR_FORMAT = 10,
+    VAULT_ERR_CORRUPT = 11,
+    VAULT_ERR_INTERNAL = 12
+} vault_result_t;
+
+#endif
