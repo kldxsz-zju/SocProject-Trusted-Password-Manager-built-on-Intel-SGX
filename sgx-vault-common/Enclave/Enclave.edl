@@ -1,6 +1,12 @@
 enclave {
+    from "sgx_tstdc.edl" import *;
+
     include "stdint.h"
     include "stddef.h"
+
+    untrusted {
+        void ocall_print([in, string] const char *str);
+    };
 
     trusted {
         public int ecall_vault_create();
