@@ -3,9 +3,22 @@
 
 #include <sgx_tseal.h>
 #include <sgx_trts.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h> /* vsnprintf */
 #include <string.h>
+
+/* Enclave 内部 printf — 通过 OCALL 输出到不可信终端 */
+int printf(const char *fmt, ...) {
+    char buf[BUFSIZ] = {'\0'};
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, BUFSIZ, fmt, ap);
+    va_end(ap);
+    ocall_print(buf);
+    return static_cast<int>(strnlen(buf, BUFSIZ - 1)) + 1;
+}
 
 namespace {
 
@@ -223,15 +236,16 @@ int ecall_vault_seal(uint8_t *sealed, uint32_t sealed_capacity, uint32_t *actual
 
     /* 默认 MRENCLAVE；实验二可用 make SEAL_POLICY=MRSIGNER 切换，而无需改业务代码。 */
 #ifdef VAULT_POLICY_MRSIGNER
-    const sgx_key_policy_t policy = SGX_KEYPOLICY_MRSIGNER;
+    const uint16_t policy = SGX_KEYPOLICY_MRSIGNER;
 #else
-    const sgx_key_policy_t policy = SGX_KEYPOLICY_MRENCLAVE;
+    const uint16_t policy = SGX_KEYPOLICY_MRENCLAVE;
 #endif
     sgx_attributes_t attribute_mask = {};
-    attribute_mask.flags = TSEAL_DEFAULT_FLAGSMASK;
-    attribute_mask.xfrm = 0;
+    attribute_mask.flags = 0xFFFFFFFFFFFFFFFFULL;
+    attribute_mask.xfrm  = 0;
+    const sgx_misc_select_t misc_mask = 0xFFFFFFFF;
     const sgx_status_t status = sgx_seal_data_ex(
-        policy, attribute_mask, TSEAL_DEFAULT_MISCMASK, 0, nullptr,
+        policy, attribute_mask, misc_mask, 0, nullptr,
         static_cast<uint32_t>(sizeof(VaultWire)),
         reinterpret_cast<const uint8_t *>(&g_vault), needed,
         reinterpret_cast<sgx_sealed_data_t *>(sealed));
