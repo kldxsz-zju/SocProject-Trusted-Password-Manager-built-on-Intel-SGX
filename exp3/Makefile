@@ -12,4 +12,3 @@ witness_client: witness_client.cpp
 
 clean:
 	rm -f witness_server witness_client witness_versions.db *.log *.sealed
-

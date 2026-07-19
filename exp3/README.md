@@ -64,6 +64,94 @@ ROLLBACK 3
 
 ## 两台电脑的 HW 实验
 
+### 1. 机器 A：先确认硬件模式的 `./app` 可以运行
+
+```bash
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX
+source /opt/intel/sgxsdk/environment
+ls -l /dev/sgx_enclave /dev/sgx_provision
+
+cd sgx-vault-common
+make clean
+make SGX_MODE=HW SGX_DEBUG=1 SEAL_POLICY=MRENCLAVE
+./app
+```
+
+第一次进入 `./app` 后，按以下顺序输入（每行输入后按 Enter）：
+
+```text
+1
+3
+github
+alice
+hw_password_v1
+8
+9
+0
+```
+
+含义是：创建密码库、添加 V1 密码、显示版本、保存 `vault.sealed`、退出。
+保存 V1 快照：
+
+```bash
+cp vault.sealed ../exp3/manual_hw_v1.sealed
+```
+
+再次运行：
+
+```bash
+./app
+```
+
+依次输入：
+
+```text
+2
+5
+github
+alice
+hw_password_v2
+8
+9
+0
+```
+
+含义是：加载 V1、更新密码、显示递增后的版本、保存 V2、退出。保存快照：
+
+```bash
+cp vault.sealed ../exp3/manual_hw_v2.sealed
+```
+
+模拟攻击者回放 V1：
+
+```bash
+cp ../exp3/manual_hw_v1.sealed vault.sealed
+./app
+```
+
+依次输入：
+
+```text
+2
+8
+4
+github
+0
+```
+
+如果程序重新显示 `hw_password_v1`，就证明 HW 模式下单独使用 SGX Sealing
+仍不能防止回滚。
+
+以上全过程也可以自动执行：
+
+```bash
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX
+chmod +x exp3/*.sh
+./exp3/run_hw_attack.sh
+```
+
+### 2. 机器 B：启动独立版本见证服务
+
 机器 B（独立可信见证机）：
 
 ```bash
@@ -71,25 +159,39 @@ cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/exp3
 ./run_hw_server.sh 8765 witness_versions.db
 ```
 
-机器 A（SGX 硬件机）：
+保持该终端运行。若机器 B 启用了防火墙：
 
 ```bash
+sudo ufw allow 8765/tcp
+```
+
+### 3. 机器 A：执行有版本见证的 HW 对照实验
+
+```bash
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX
 source /opt/intel/sgxsdk/environment
-cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common
-make clean
-make SGX_MODE=HW SGX_DEBUG=1 SEAL_POLICY=MRSIGNER
-./app
+chmod +x exp3/*.sh
+./exp3/run_hw_protected_client.sh <机器B的IP> 8765
 ```
 
-检查两台机器的版本见证连通性：
+该脚本会从头执行以下过程：
 
-```bash
-cd ../exp3
-./run_hw_client.sh <机器B的IP> 8765 COMMIT 00112233445566778899aabbccddeeff 3
-./run_hw_client.sh <机器B的IP> 8765 CHECK  00112233445566778899aabbccddeeff 2
+1. 以 `SGX_MODE=HW` 编译现有密码库；
+2. 运行 `./app` 创建 V1 并读取 `state_version`；
+3. 再运行 `./app` 更新为 V2；
+4. 向机器 B 提交 V2 的可信版本；
+5. 用 V1 密封文件替换当前文件；
+6. 运行 `./app` 解封 V1，但不读取密码；
+7. 把解封得到的旧版本发给机器 B 检查；
+8. 收到 `ROLLBACK` 后停止，不执行 Get/List/Update。
+
+预期输出包含：
+
+```text
+ROLLBACK 3
+[PASS] HW 有防护路径拒绝回滚
+[PASS] fail-closed：没有执行密码读取
 ```
-
-第二条命令应返回 `ROLLBACK 3`，退出码为 10。
 
 ## 从零开始的推荐运行顺序
 
