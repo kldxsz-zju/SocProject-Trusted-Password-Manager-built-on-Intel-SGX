@@ -1,198 +1,66 @@
-# SocProject-Trusted-Password-Manager-built-on-Intel-SGX
+# 实验三：SGX 硬件模式回滚实验
 
-## 0. 概念介绍
+本目录只保留真实 Intel SGX 硬件模式代码。
 
-## SGX: Intel Software Guard Extensions
-
-它是 Intel 处理器提供的一种硬件级安全技术，其核心目标是：即使操作系统、管理员权限程序或其他普通程序不可信，也尽量保护一小部分敏感代码和数据不被读取或修改。
-它会在普通程序内部划出一块由 CPU 保护的区域，敏感代码和数据放在这块区域中运行，这个区域即为Enclave。
-
-## Enclave:
-
-相当于是CPU内部的一个保险柜，普通程序可以请求 Enclave 执行某些操作，但是不能随意读取 Enclave 内部的数据。
-
-例如，普通程序可以告诉 Enclave：请帮我检查用户输入的密码是否正确。
-
-Enclave 可以返回：正确/错误
-
-但是普通程序不一定需要得到真正的密码或主密钥。、
-
-## 调用
-
-SGX 程序经常使用两类调用
-
-### ECALL：普通程序调用 Enclave 内部的函数。
-
-例如：
-
-<img width="106" height="59" alt="image" src="https://github.com/user-attachments/assets/0aa5cfe7-e414-4658-bbda-64af2d167783" />
-
-示例：
-
-ecall_add_password("github", "alice", "123456");
-
-当然，实际项目中不应该随意让密码在普通程序和 Enclave 之间来回传递，需要仔细设计接口。
-
-### OCALL：Enclave 请求外部普通程序执行某项操作。
-
-例如，Enclave 自己不能直接保存文件，于是它可以把已经密封好的数据交给普通程序：
-
-<img width="187" height="149" alt="image" src="https://github.com/user-attachments/assets/a3ce2c60-4970-49d8-b00b-45c33b645690" />
-
-
-## 1. 项目简介
-
-研究如何利用 Intel SGX Sealing 机制，对密码库中的主密钥、密码条目和关键状态进行安全持久化。
-
-Intel SGX 可以保护 Enclave 运行期间的敏感数据，但程序关闭、服务器重启或系统崩溃后，密码库仍然需要保存到磁盘。普通文件加密通常依赖外部密钥管理，而 SGX Sealing 可以根据 Enclave 身份和平台信息派生密封密钥，使密封后的数据只能由满足条件的 Enclave 解封。
-
-计划实现一个简化的命令行密码库，主要关注一下问题：
-
-- 密封文件被直接读取时，是否会泄露密码明文；
-- 密封文件被修改、截断或替换时，系统能否发现；
-- 程序重启后能否正常恢复密码库；
-- 文件复制到其他位置或其他机器后能否恢复；
-- `MRENCLAVE` 和 `MRSIGNER` 两种密封策略的区别；
-- 程序升级后，旧版本密码库能否继续使用；
-- SGX Sealing 是否能够防止旧版本密码库被回滚；
-- 系统异常退出时，如何降低密码库文件损坏的风险。
-
----
-
-## 2. 项目目标
-
-1. 实现一个最小化的 SGX 密码库；
-2. 将密码明文和主密钥限制在 Enclave 内部；
-3. 使用 SGX Sealing 将密码库保存到不可信磁盘；
-4. 实现密码库的创建、添加、查询、修改、删除和恢复；
-5. 对密封文件进行读取、篡改、复制和回滚攻击测试；
-6. 比较 `MRENCLAVE` 和 `MRSIGNER` 两种 Sealing Policy；
-7. 分析 SGX Sealing 的能力、限制和适用场景；
-8. 设计一个带版本验证的回滚攻击防护方案。
-
----
-
-## 3. 核心研究问题
-
-### 3.1 密封文件能否保护密码明文
-
-攻击者可能拥有服务器管理员权限，并能够直接读取磁盘中的所有文件。本项目将检查密封文件中是否能搜索到密码、用户名或主密钥等敏感信息。
-
-### 3.2 密封文件能否检测篡改
-
-攻击者可能对密封文件执行以下操作：
-
-- 修改一个字节；
-- 随机覆盖一段内容；
-- 删除文件尾部；
-- 修改文件头；
-- 拼接两个密封文件；
-- 用其他密封文件替换当前密码库。
-
-项目将观察 SGX 解封操作是否拒绝这些异常文件。
-
-### 3.3 `MRENCLAVE` 与 `MRSIGNER` 的区别
-
-`MRENCLAVE` 将密封数据绑定到特定 Enclave 测量值。程序代码发生变化后，旧数据通常无法由新版本 Enclave 解封。
-
-`MRSIGNER` 将密封数据绑定到签名者身份。只要新版本仍由相同签名者发布，并满足版本条件，就可以设计为继续恢复旧数据。
-
-本项目将通过两个 Enclave 版本验证两种策略在安全性和可升级性上的差异。
-
-### 3.4 Sealing 是否能够防止回滚攻击
-
-SGX Sealing 可以检测非法修改，但一个旧的密封文件本身仍可能是合法生成的。
-
-例如：
-
-1. 用户保存旧密码，生成 `vault_v1.sealed`；
-2. 用户修改密码，生成 `vault_v2.sealed`；
-3. 攻击者保存并重新放回 `vault_v1.sealed`；
-4. 系统可能正常解封旧文件。
-
-因此，本项目计划重点说明：
-
-> SGX Sealing 可以提供机密性和完整性，但不能单独保证数据新鲜性。
-
----
-
-## 4. 威胁模型
-
-### 4.1 假设攻击者能够
-
-- 读取磁盘中的所有文件；
-- 修改、删除、复制和替换密封文件；
-- 控制普通应用程序；
-- 控制操作系统；
-- 保存旧版本文件并在之后重新放回；
-- 查看程序二进制文件；
-- 使程序异常退出；
-- 将文件复制到其他目录或其他机器。
-
-### 4.2 假设攻击者不能
-
-- 直接获得 SGX 处理器内部的密封密钥；
-- 直接读取生产模式 Enclave 内存；
-- 获得合法的 Enclave 签名私钥；
-- 破坏底层硬件信任根。
-
-### 4.3 扩展讨论
-
-以下问题不作为本项目核心内容，但会在论文中作为限制进行讨论：
-
-- 缓存侧信道攻击；
-- Spectre 类瞬态执行攻击；
-- 键盘记录器；
-- 弱主密码；
-- 浏览器或客户端被控制；
-- 拒绝服务攻击；
-- Enclave 内部缓冲区溢出；
-- 复杂物理硬件攻击。
-
----
-
-## 5. 系统架构
+## 文件
 
 ```text
-┌──────────────────────────────┐
-│       Untrusted App          │
-│                              │
-│  CLI / File I/O / Commands   │
-│                              │
-│  vault.sealed                │
-└──────────────┬───────────────┘
-               │ ECALL / OCALL
-┌──────────────▼───────────────┐
-│          SGX Enclave         │
-│                              │
-│  Credential Management       │
-│  Vault Serialization         │
-│  Seal / Unseal               │
-│  Version Validation          │
-│  Integrity Validation        │
-│                              │
-│  Plaintext and keys only     │
-│  exist inside the Enclave    │
-└──────────────────────────────┘
+run_hw_attack.sh            复现无防护回滚攻击
+run_hw_server.sh            在机器 B 启动版本见证服务
+run_hw_client.sh            手工调用见证客户端
+run_hw_protected_client.sh  在机器 A 运行版本检测实验
+witness_server.cpp          版本见证服务器
+witness_client.cpp          版本见证客户端
+Makefile                    编译见证程序
 ```
 
-### Enclave 内部负责
+## 1. 无防护回滚攻击
 
-- 保存密码明文；
-- 保存密码库主密钥；
-- 密码条目的增删改查；
-- 密码库序列化和反序列化；
-- SGX Sealing 和 Unsealing；
-- 文件格式版本检查；
-- 状态版本检查；
-- 解封失败后的安全处理。
+在支持 SGX 的机器上运行：
 
-### Enclave 外部负责
+```bash
+source /opt/intel/sgxsdk/environment
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX
+chmod +x exp3/*.sh
+./exp3/run_hw_attack.sh
+```
 
-- 命令行界面；
-- 读取和写入密封文件；
-- 菜单和用户输入；
-- 普通日志；
-- 文件路径管理。
+脚本会创建旧、新两份密封文件，然后用旧文件覆盖当前状态。如果旧密码重新出现，
+说明 SGX Sealing 能防篡改，但不能单独防止合法旧文件回滚。
 
-外部程序只能接触密封后的数据，不应该直接获得完整密码库明文。
+## 2. 双机版本检测
+
+机器 B 启动见证服务：
+
+```bash
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/exp3
+./run_hw_server.sh 8765 witness_versions.db
+```
+
+机器 A 运行硬件实验：
+
+```bash
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX
+source /opt/intel/sgxsdk/environment
+./exp3/run_hw_protected_client.sh <机器B的IP> 8765
+```
+
+回放旧密封文件后，预期输出：
+
+```text
+ROLLBACK 3
+[PASS] HW 有防护路径拒绝回滚
+[PASS] fail-closed：没有执行密码读取
+```
+
+## 安全边界
+
+当前实现是在外部客户端中检查版本，适合验证实验原理。若宿主系统也不可信，
+还需要在 Enclave 内验证见证机签名，并在验证通过前禁止密码读写操作。
+
+## 清理
+
+```bash
+make -C exp3 clean
+rm -f sgx-vault-common/vault.sealed
+```
