@@ -1,67 +1,57 @@
-# exp3-remote-hw
+# Exp3：两台电脑上的 SGX 回滚攻击与远程见证防护实验
 
-本文说明如何在两台 Ubuntu 电脑之间运行实验三：先在机器 A 上复现**没有回滚防护时的攻击**，再由机器 B 运行远程版本见证服务，验证机器 A 能否识别并拒绝旧的 SGX 密封文件。
+本文说明如何使用 `sgx-vault-common-new` 在两台 Ubuntu 电脑上完成 Exp3：
 
-## 1. 实验结构
+1. 在机器 A 上回放旧的 SGX 密封文件，复现无防护回滚攻击。
+2. 在机器 B 上运行远程版本见证服务。
+3. 再次回放旧密封文件，验证机器 A 能在读取密码前发现并拒绝回滚。
 
-两台电脑上的代码目录均与本项目相同：
+> 本实验使用真实 SGX 硬件模式（`SGX_MODE=HW`）。见证协议是实验用明文 TCP 协议，只应在可信局域网中使用，不要暴露到公网。
+
+## 1. 两台机器的角色
+
+| 机器 | 作用 | 是否需要 SGX |
+| --- | --- | --- |
+| 机器 A（SGX 客户端） | 运行密码库、备份和回放密封文件、查询见证服务 | 是 |
+| 机器 B（见证服务器） | 保存每个密码库 ID 的最新可信版本 | 否 |
+
+两台机器都准备同一份项目代码。本文假设项目位于：
 
 ```text
 ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/
-└── sgx-vault-common/
+└── sgx-vault-common-new/
     ├── App/
     ├── Enclave/
     ├── Include/
     ├── Makefile
-    └── experiments/
+    └── bin/
         ├── run_hw_attack.sh
-        ├── run_hw_client.sh
         ├── run_hw_protected_client.sh
         ├── run_hw_server.sh
         ├── witness_client.cpp
         └── witness_server.cpp
 ```
 
-两台电脑的角色如下：
+以下命令都在 Linux 终端中执行。不要在旧的 `sgx-vault-common` 目录中运行实验脚本。
 
-- **机器 A（SGX 机器）**：运行密码库、制造旧密封文件回放，并向机器 B 查询可信版本。
-- **机器 B（见证机器）**：保存密码库的最新可信版本，收到查询后判断机器 A 加载的版本是否已经回滚。
+## 2. 实验前准备
 
-机器 A 必须支持 Intel SGX 硬件模式。机器 B 只运行普通 C++ TCP 服务，不要求支持 SGX。
-
-## 2. 准备两台电脑
-
-### 2.1 确认代码路径
+### 2.1 两台机器：检查代码并安装编译工具
 
 在机器 A 和机器 B 上分别执行：
 
 ```bash
-cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common
-pwd
-ls experiments
-```
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common-new
+ls bin/run_hw_*.sh
+chmod +x bin/run_hw_attack.sh bin/run_hw_protected_client.sh bin/run_hw_server.sh
 
-`experiments` 中应至少能看到上面列出的六个文件。
-
-给四个脚本增加执行权限：
-
-```bash
-chmod +x experiments/run_hw_attack.sh \
-         experiments/run_hw_client.sh \
-         experiments/run_hw_protected_client.sh \
-         experiments/run_hw_server.sh
-```
-
-### 2.2 安装编译工具
-
-两台电脑都需要 `g++` 和 `make`：
-
-```bash
 sudo apt update
 sudo apt install -y build-essential
 ```
 
-机器 A 还必须安装 Intel SGX SDK 和运行库。加载 SDK 环境并检查 SGX 设备：
+### 2.2 机器 A：检查 SGX 硬件环境
+
+机器 A 需要 Intel SGX SDK、运行库和可用的 SGX 设备：
 
 ```bash
 source /opt/intel/sgxsdk/environment
@@ -69,9 +59,16 @@ echo "$SGX_SDK"
 ls -l /dev/sgx_enclave
 ```
 
-如果 `/dev/sgx_enclave` 不存在，应先检查 CPU、BIOS/UEFI 中的 SGX 设置、Linux SGX 驱动和当前用户的设备权限。这里必须使用真实硬件模式，不能用 `SGX_MODE=SIM` 代替。
+预期 `SGX_SDK` 指向 `/opt/intel/sgxsdk`，并且 `/dev/sgx_enclave` 存在。如果设备不存在，应检查：
 
-### 2.3 确认机器 B 的地址和端口
+- CPU 是否支持 Intel SGX；
+- BIOS/UEFI 是否启用 SGX；
+- Linux SGX 驱动和运行库是否安装；
+- 当前用户是否有访问 SGX 设备的权限。
+
+本实验不能用 `SGX_MODE=SIM` 代替硬件模式。
+
+### 2.3 机器 B：确定 IP 和开放端口
 
 在机器 B 上查看局域网 IP：
 
@@ -79,217 +76,288 @@ ls -l /dev/sgx_enclave
 hostname -I
 ```
 
-以下示例假设机器 B 的 IP 是 `192.168.1.20`，见证服务端口使用默认值 `8765`。实际运行时请替换成机器 B 的真实 IP。
+本文以 `192.168.1.20` 为例，实际操作时必须替换为机器 B 的真实 IP。默认见证端口是 TCP `8765`。
 
-如果机器 B 启用了 UFW，需要允许机器 A 访问该端口：
+如果机器 B 启用了 UFW，只允许机器 A 的 IP 访问该端口。例如机器 A 的 IP 为 `192.168.1.10`：
 
 ```bash
-sudo ufw allow 8765/tcp
+sudo ufw allow from 192.168.1.10 to any port 8765 proto tcp
 ```
-
-只在可信局域网内运行本实验。见证协议是实验用明文 TCP 协议，不应直接暴露到公网。
 
 ## 3. 实验一：复现无防护回滚攻击
 
-这一部分只在机器 A 上运行，不需要启动机器 B。
-
-在机器 A 上执行：
+这一部分只在机器 A 上运行，机器 B 暂时不需要启动。
 
 ```bash
-cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common-new
 source /opt/intel/sgxsdk/environment
-./experiments/run_hw_attack.sh
+./bin/run_hw_attack.sh
 ```
 
-脚本会自动完成以下过程：
+脚本会自动：
 
-1. 使用 `SGX_MODE=HW` 和 `SEAL_POLICY=MRENCLAVE` 重新编译密码库。
-2. 创建第一版密码库，保存密码 `hw_password_v1`，并备份第一版密封文件。
-3. 将密码修改成 `hw_password_v2`，再备份第二版密封文件。
-4. 用第一版密封文件覆盖当前的 `vault.sealed`，模拟攻击者回放合法的旧文件。
-5. 重新加载密码库并检查旧密码是否重新出现。
+1. 以 `SGX_MODE=HW`、`SEAL_POLICY=MRENCLAVE` 编译程序；
+2. 创建第一版密码库，保存 `hw_password_v1`；
+3. 将密码更新为 `hw_password_v2`；
+4. 用第一版密封文件覆盖当前 `vault.sealed`，模拟攻击者回放合法旧文件；
+5. 加载回放后的文件并检查旧密码是否重新出现。
 
-成功复现攻击时，最后应出现类似结果：
+成功复现时，最后应出现一条 `[PASS]`，语义如下：
 
 ```text
 [PASS] HW 无防护回滚成功：SGX 接受了旧但合法的密封文件。
 ```
 
-实验文件和日志保存在：
+实验产物位于机器 A 的 `sgx-vault-common-new/bin/`：
 
 ```text
-sgx-vault-common/experiments/hw_vault_v1.sealed
-sgx-vault-common/experiments/hw_vault_v2.sealed
-sgx-vault-common/experiments/hw_v1.log
-sgx-vault-common/experiments/hw_v2.log
-sgx-vault-common/experiments/hw_rollback.log
+hw_vault_v1.sealed
+hw_vault_v2.sealed
+hw_v1.log
+hw_v2.log
+hw_rollback.log
 ```
 
-该结果说明 SGX Sealing 可以发现文件被篡改，但单独使用 Sealing 无法判断一个密码正确、签名有效的密封文件是不是旧版本。
-
-## 4. 实验二：两台电脑进行远程回滚防护
-
-先启动机器 B 的见证服务，再运行机器 A 的受保护客户端。实验期间应保持机器 B 的终端和服务一直运行。
-
-### 4.1 在机器 B 上启动见证服务器
-
-打开机器 B 的终端，执行：
+可进一步核对回滚日志：
 
 ```bash
-cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common
-./experiments/run_hw_server.sh 8765 experiments/witness_versions.db
+grep -n "hw_password_v1" bin/hw_rollback.log
 ```
 
-第一次运行时，`make` 会根据 `witness_server.cpp` 编译 `witness_server`。服务器成功启动后应显示：
+能读到 `hw_password_v1` 表明攻击成功。原因是 SGX Sealing 能检测密封数据是否被篡改，但不能单独判断一个完整、合法的密封文件是否为旧版本。
+
+## 4. 实验二：使用远程见证防止回滚
+
+先在机器 B 启动见证服务器并保持运行，再在机器 A 运行受保护客户端。
+
+### 4.1 机器 B：启动见证服务器
+
+在机器 B 的终端执行：
+
+```bash
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common-new
+./bin/run_hw_server.sh 8765 bin/witness_versions.db
+```
+
+首次运行时，`make` 会按隐式 C++ 编译规则从 `witness_server.cpp` 构建 `witness_server`。启动成功后应显示：
 
 ```text
-Witness listening on 0.0.0.0:8765, db=experiments/witness_versions.db
+Witness listening on 0.0.0.0:8765, db=bin/witness_versions.db
 ```
 
-这个终端会一直被服务器占用，不要关闭。`experiments/witness_versions.db` 用于保存各密码库 ID 对应的最新可信版本。
-
-如需确认端口确实正在监听，可在机器 B 的另一个终端执行：
+保持该终端运行。可在机器 B 的另一个终端确认端口：
 
 ```bash
 ss -ltn | grep 8765
 ```
 
-### 4.2 可选：从机器 A 测试网络连通性
+`bin/witness_versions.db` 保存“32 位十六进制密码库 ID → 最新可信版本”的映射，服务器重启后记录仍然存在。
 
-机器 B 服务启动后，在机器 A 上执行：
+### 4.2 机器 A：测试网络连通性
+
+将示例 IP 换成机器 B 的真实 IP：
 
 ```bash
 nc -vz 192.168.1.20 8765
 ```
 
-如果系统没有 `nc`：
+如果没有 `nc`：
 
 ```bash
 sudo apt install -y netcat-openbsd
 ```
 
-连接失败时，检查机器 B 的 IP、两台电脑是否在可互通的网络、UFW/其他防火墙，以及见证服务器是否仍在运行。
-
-### 4.3 在机器 A 上运行受保护实验
-
-在机器 A 的另一个终端执行：
+### 4.3 机器 A：运行受保护实验
 
 ```bash
-cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common-new
 source /opt/intel/sgxsdk/environment
-./experiments/run_hw_protected_client.sh 192.168.1.20 8765
+./bin/run_hw_protected_client.sh 192.168.1.20 8765
 ```
 
-将 `192.168.1.20` 替换为机器 B 的真实 IP。第三个参数可以指定 32 位十六进制实验密码库 ID；省略时使用脚本内置的默认 ID。例如：
+参数格式为：
+
+```text
+run_hw_protected_client.sh WITNESS_HOST [PORT] [EXPERIMENT_VAULT_ID]
+```
+
+第三个参数可选，必须是 32 位十六进制字符串。省略时使用脚本内置 ID `00112233445566778899aabbccddeeff`。例如：
 
 ```bash
-./experiments/run_hw_protected_client.sh \
+./bin/run_hw_protected_client.sh \
   192.168.1.20 8765 11112222333344445555666677778888
 ```
 
-同一轮实验应始终使用同一个 ID。并行运行多个独立实验时，应为每个实验使用不同的 32 位十六进制 ID。
+脚本会自动：
 
-受保护脚本会自动完成以下过程：
+1. 编译见证客户端和 SGX 硬件版密码库；
+2. 创建包含 `protected_password_v1` 的第一版密封文件；
+3. 更新为 `protected_password_v2` 并生成第二版密封文件；
+4. 向机器 B 提交第二版的状态版本；
+5. 在机器 A 上回放第一版密封文件；
+6. 只加载旧文件并提取其状态版本，不读取密码内容；
+7. 向机器 B 发起 `CHECK`；
+8. 收到 `ROLLBACK <可信版本>` 后终止操作，实现 fail-closed。
 
-1. 编译见证客户端以及 SGX 硬件版密码库。
-2. 创建第一版密码库并保存 `protected_password_v1`。
-3. 更新为第二版并保存 `protected_password_v2`。
-4. 将第二版的状态版本提交给机器 B，机器 B 将其记录为最新可信版本。
-5. 在机器 A 上回放第一版密封文件。
-6. 机器 A 先从旧文件读取状态版本，再向机器 B 查询该版本是否可信。
-7. 机器 B 发现本地版本小于已提交版本，返回 `ROLLBACK`；机器 A 在读取密码内容前终止操作。
-
-防护成功时，机器 A 最后应看到类似输出：
-
-```text
-ROLLBACK 3
-[PASS] HW 有防护路径拒绝回滚：本地版本=2，可信版本=3。
-[PASS] fail-closed：没有执行密码读取。
-```
-
-具体数字取决于密码库的版本增长过程，但关键是出现 `ROLLBACK` 和两条 `[PASS]`。
-
-相关文件和日志保存在机器 A 的：
+防护成功时，关键输出应包含：
 
 ```text
-sgx-vault-common/experiments/protected_v1.sealed
-sgx-vault-common/experiments/protected_v2.sealed
-sgx-vault-common/experiments/protected_v1.log
-sgx-vault-common/experiments/protected_v2.log
-sgx-vault-common/experiments/protected_rollback_check.log
+ROLLBACK <可信版本>
+[PASS] ...拒绝回滚...
+[PASS] fail-closed...
 ```
 
-机器 B 的可信版本记录保存在：
+版本数字由实际状态增长过程决定。判断成功的关键是出现 `ROLLBACK` 和两条 `[PASS]`，并且没有在检查后读取旧密码。
+
+机器 A 的证据文件位于：
 
 ```text
-sgx-vault-common/experiments/witness_versions.db
+sgx-vault-common-new/bin/protected_v1.sealed
+sgx-vault-common-new/bin/protected_v2.sealed
+sgx-vault-common-new/bin/protected_v1.log
+sgx-vault-common-new/bin/protected_v2.log
+sgx-vault-common-new/bin/protected_rollback_check.log
 ```
 
-## 5. 重新进行一轮干净实验
+机器 B 的可信版本记录位于：
 
-见证数据库会跨进程重启保留。若要使用相同的密码库 ID 从头重做实验，应先停止机器 B 的服务器（在服务器终端按 `Ctrl+C`），然后在机器 B 上删除旧实验数据库，再重新启动服务：
+```text
+sgx-vault-common-new/bin/witness_versions.db
+```
+
+## 5. 建议记录的实验结果
+
+为便于对照和写实验报告，至少保存以下证据：
+
+| 场景 | 操作 | 预期结果 | 证据 |
+| --- | --- | --- | --- |
+| 无防护 | 回放 V1 密封文件 | V1 被 SGX 正常加载，旧密码重新出现 | `bin/hw_rollback.log` |
+| 有防护 | B 已记录 V2，再回放 V1 | B 返回 `ROLLBACK`，A 在读取密码前终止 | `bin/protected_rollback_check.log` |
+| 远程状态 | 查看见证数据库 | 同一密码库 ID 保存最新可信版本 | B 上的 `bin/witness_versions.db` |
+
+建议同时记录：
 
 ```bash
-cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common
-rm -f experiments/witness_versions.db experiments/witness_versions.db.tmp
-./experiments/run_hw_server.sh 8765 experiments/witness_versions.db
+# 机器 A
+date
+hostname
+grep -E "model name|sgx" /proc/cpuinfo | head
+sha256sum bin/hw_vault_v1.sealed bin/hw_vault_v2.sealed
+sha256sum bin/protected_v1.sealed bin/protected_v2.sealed
+
+# 机器 B
+date
+hostname
+cat bin/witness_versions.db
 ```
 
-也可以保留数据库并在机器 A 上为新一轮实验传入一个新的 32 位十六进制密码库 ID。
+## 6. 重新进行一轮干净实验
 
-## 6. 手工测试见证服务（可选）
-
-机器 B 服务启动后，可在机器 A 上直接调用见证客户端。以下命令使用一个测试 ID：
+见证数据库会跨进程重启保留。推荐每轮使用新的 32 位十六进制密码库 ID，这样不必删除旧记录：
 
 ```bash
-cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common
+./bin/run_hw_protected_client.sh \
+  192.168.1.20 8765 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
 
-./experiments/run_hw_client.sh \
+如果必须复用同一个 ID：
+
+1. 在机器 B 的服务器终端按 `Ctrl+C` 停止服务；
+2. 备份或删除 `bin/witness_versions.db` 和可能存在的 `.tmp` 文件；
+3. 重新启动服务器。
+
+例如：
+
+```bash
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common-new
+cp -a bin/witness_versions.db "bin/witness_versions.db.$(date +%Y%m%d-%H%M%S).bak"
+rm -f bin/witness_versions.db bin/witness_versions.db.tmp
+./bin/run_hw_server.sh 8765 bin/witness_versions.db
+```
+
+## 7. 可选：手工验证见证协议
+
+机器 B 的服务启动后，在机器 A 编译并调用客户端：
+
+```bash
+cd ~/SocProject-Trusted-Password-Manager-built-on-Intel-SGX/sgx-vault-common-new/bin
+make witness_client
+
+./witness_client \
   192.168.1.20 8765 COMMIT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 5
 
-./experiments/run_hw_client.sh \
+./witness_client \
   192.168.1.20 8765 CHECK aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 4
 ```
 
-第一次提交应返回 `OK 5`；随后用版本 4 查询应返回 `ROLLBACK 5`。`run_hw_client.sh` 在收到 `ROLLBACK` 时会以退出码 `10` 结束，这是预期行为，不表示网络或程序崩溃。
+第一次应返回：
 
-## 7. 常见问题
+```text
+OK 5
+```
 
-### 机器 A 报 `/dev/sgx_enclave` 不存在
+第二次应返回：
 
-当前电脑没有可用的 SGX 硬件设备。检查 CPU 是否支持 SGX、BIOS/UEFI 是否启用 SGX、Linux SGX 驱动以及设备权限。
+```text
+ROLLBACK 5
+```
+
+`witness_client` 收到 `ROLLBACK` 时退出码为 `10`，这是预期行为，并非程序崩溃。可用以下命令检查：
+
+```bash
+echo $?
+```
+
+## 8. 常见问题
+
+### `/dev/sgx_enclave` 不存在
+
+机器 A 没有可用的 SGX 硬件设备。检查 CPU、BIOS/UEFI、SGX 驱动、运行库和设备权限。
 
 ### 编译时找不到 SGX SDK
 
-先执行：
+在机器 A 重新加载环境：
 
 ```bash
 source /opt/intel/sgxsdk/environment
 ```
 
-并确认 `SGX_SDK` 指向 `/opt/intel/sgxsdk`。
+然后确认：
+
+```bash
+echo "$SGX_SDK"
+```
 
 ### 机器 A 无法连接机器 B
 
-确认以下事项：
+检查：
 
-- 使用的是机器 B 的局域网 IP，而不是 `127.0.0.1`。
-- 机器 B 的 `run_hw_server.sh` 仍在运行。
-- 机器 B 的 TCP 端口 `8765` 已放行。
-- 两台电脑之间没有路由、访客 Wi-Fi隔离或单位网络访问控制。
+- 使用的是机器 B 的局域网 IP，而不是 `127.0.0.1`；
+- 机器 B 的见证服务器终端仍在运行；
+- TCP 端口 `8765` 已放行；
+- 两台机器可互相路由，且未被访客 Wi-Fi 隔离；
+- 启动服务器时使用的端口与客户端参数一致。
 
 ### 返回 `UNREGISTERED 0`
 
-表示机器 B 的数据库中还没有这个密码库 ID。必须先对同一 ID 执行 `COMMIT`；正常情况下 `run_hw_protected_client.sh` 会自动完成提交。
+机器 B 尚未保存该密码库 ID。必须先用同一个 ID 执行 `COMMIT`。正常情况下，受保护实验脚本会自动提交。
 
-### 第二次实验立即得到与预期不同的版本结果
+### 返回 `UNCOMMITTED <版本>`
 
-通常是因为机器 B 保留了上一轮的 `witness_versions.db`。使用新的实验 ID，或者按“重新进行一轮干净实验”一节停止服务器并清理数据库。
+客户端检查的本地版本高于服务器记录，说明新版本尚未提交，或使用了错误的密码库 ID。不要直接信任该状态；先核对实验 ID 和提交步骤。
 
-## 8. 实验结论
+### 第二轮立即得到异常版本结果
 
-- 无防护实验中，旧密封文件仍然具有合法的 SGX 完整性保护，因此可以被成功加载，回滚攻击成立。
-- 有防护实验中，机器 B 保存独立于密封文件的最新版本。攻击者即使回放合法旧文件，也无法同步回滚远程见证记录。
-- 机器 A 在读取密码前查询机器 B，并在发现旧版本时 fail-closed，因此阻止了旧密码内容被使用。
+通常是复用了密码库 ID，而机器 B 仍保存上一轮记录。改用新 ID，或按“重新进行一轮干净实验”清理数据库。
 
-当前实现用于演示远程版本见证的基本原理。见证协议本身没有 TLS、客户端认证或服务器签名，因此生产系统还需要增加双向认证、传输加密、见证服务持久化保护和高可用设计。
+### `make witness_server` 或 `make witness_client` 失败
+
+确认机器上已安装 `build-essential`，并且当前目录为 `sgx-vault-common-new/bin`。这里使用 GNU Make 的内置 C++ 编译规则直接编译同名 `.cpp` 文件。
+
+## 9. 实验结论
+
+- 无防护时，旧密封文件仍具有合法的 SGX 完整性保护，因此能够被成功加载；SGX Sealing 本身不提供新鲜性保证。
+- 有防护时，机器 B 独立保存最新可信版本。攻击者即使回放合法旧文件，也不能同时回滚远程见证记录。
+- 机器 A 在读取密码前查询机器 B，并在发现旧版本时 fail-closed，因此阻止了旧密码内容被继续使用。
+
+当前实现用于演示远程版本见证原理。见证协议本身没有 TLS、客户端认证、服务器签名或防重放会话保护；生产系统还需要双向认证、传输加密、见证存储保护、高可用及可信身份绑定。
