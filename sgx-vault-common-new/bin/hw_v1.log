@@ -1,0 +1,83 @@
+Enclave loaded successfully.
+
+========================================
+  SGX Password Vault
+========================================
+  [1] Create vault
+  [2] Load vault from 'vault.sealed'
+  [3] Add credential
+  [4] Get credential
+  [5] Update credential
+  [6] Delete credential
+  [7] List services
+  [8] Show versions
+  [9] Save vault to 'vault.sealed'
+  [0] Exit
+----------------------------------------
+Choice: Set a PIN for the vault (4-8 characters): Confirm PIN: OK.
+
+========================================
+  SGX Password Vault
+========================================
+  [1] Create vault
+  [2] Load vault from 'vault.sealed'
+  [3] Add credential
+  [4] Get credential
+  [5] Update credential
+  [6] Delete credential
+  [7] List services
+  [8] Show versions
+  [9] Save vault to 'vault.sealed'
+  [0] Exit
+----------------------------------------
+Choice: Service name: Username: Password: OK.
+
+========================================
+  SGX Password Vault
+========================================
+  [1] Create vault
+  [2] Load vault from 'vault.sealed'
+  [3] Add credential
+  [4] Get credential
+  [5] Update credential
+  [6] Delete credential
+  [7] List services
+  [8] Show versions
+  [9] Save vault to 'vault.sealed'
+  [0] Exit
+----------------------------------------
+Choice: Format version: 1, State version: 2
+OK.
+
+========================================
+  SGX Password Vault
+========================================
+  [1] Create vault
+  [2] Load vault from 'vault.sealed'
+  [3] Add credential
+  [4] Get credential
+  [5] Update credential
+  [6] Delete credential
+  [7] List services
+  [8] Show versions
+  [9] Save vault to 'vault.sealed'
+  [0] Exit
+----------------------------------------
+Choice: Vault saved to 'vault.sealed' (59520 bytes).
+OK.
+
+========================================
+  SGX Password Vault
+========================================
+  [1] Create vault
+  [2] Load vault from 'vault.sealed'
+  [3] Add credential
+  [4] Get credential
+  [5] Update credential
+  [6] Delete credential
+  [7] List services
+  [8] Show versions
+  [9] Save vault to 'vault.sealed'
+  [0] Exit
+----------------------------------------
+Choice: Goodbye.
