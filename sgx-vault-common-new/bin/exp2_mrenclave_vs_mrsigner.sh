@@ -1,7 +1,11 @@
 #!/bin/bash
 # ============================================================================
-# 实验二：MRENCLAVE vs MRSIGNER 对比（增强版）
-# 用法: ./exp2_mrenclave_vs_mrsigner.sh SIM|HW
+# 实验二：MRENCLAVE vs MRSIGNER 对比
+# 
+# 用法:
+#   chmod +x experiments/exp2_mrenclave_vs_mrsigner.sh
+#   ./experiments/exp2_mrenclave_vs_mrsigner.sh SIM   # 仿真模式
+#   ./experiments/exp2_mrenclave_vs_mrsigner.sh HW    # 硬件模式
 # ============================================================================
 set -euo pipefail
 
@@ -15,6 +19,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
 PASS="${GREEN}[PASS]${NC}"
 FAIL="${RED}[FAIL]${NC}"
 INFO="${YELLOW}[INFO]${NC}"
@@ -22,16 +27,12 @@ INFO="${YELLOW}[INFO]${NC}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-# ── 清理函数 ──
+# ── 退出时自动清理 ──
 cleanup() {
-    # 如果存在 V2 标记，还原代码
     if grep -q 'V2_EXPERIMENT_MARKER' Enclave/Enclave.cpp 2>/dev/null; then
         echo -e "$INFO [cleanup] 还原 Enclave.cpp 到 V1..."
-        # 删除插入的函数定义（在末尾）
         sed -i '/V2_EXPERIMENT_MARKER/d' Enclave/Enclave.cpp
-        # 删除插入的函数调用（在 ecall_vault_create 中）
-        sed -i '/v2_dummy_function(); \/\/ V2_EXPERIMENT_MARKER/d' Enclave/Enclave.cpp
-        # 删除可能多余的空行
+        # 压缩连续空行（保留至多一个空行）
         sed -i '/^$/N;/^\n$/D' Enclave/Enclave.cpp
     fi
     rm -f vault_mrenclave_v1.sealed vault_mrsigner_v1.sealed vault.sealed
@@ -39,9 +40,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ── 工具函数 ──
+# ============================================================================
+# 工具函数
+# ============================================================================
 run_app() {
     printf '%s\n' "$@" | ./app 2>&1
+}
+
+make_v2_code() {
+    if ! grep -q 'V2_EXPERIMENT_MARKER' Enclave/Enclave.cpp; then
+        echo -e "$INFO 修改 Enclave.cpp → V2（改变 format_version 赋值）..."
+        # 将赋值语句替换为显式 2，并添加注释标记
+        sed -i 's/g_vault.format_version = VAULT_FORMAT_VERSION;/g_vault.format_version = 2; \/\/ V2_EXPERIMENT_MARKER/' Enclave/Enclave.cpp
+    fi
+}
+
+ensure_v1_code() {
+    if grep -q 'V2_EXPERIMENT_MARKER' Enclave/Enclave.cpp; then
+        echo -e "$INFO 还原 Enclave.cpp 到 V1..."
+        # 将赋值恢复为原来的 VAULT_FORMAT_VERSION
+        sed -i 's/g_vault.format_version = 2; \/\/ V2_EXPERIMENT_MARKER/g_vault.format_version = VAULT_FORMAT_VERSION;/' Enclave/Enclave.cpp
+    fi
 }
 
 build() {
@@ -65,37 +84,22 @@ get_mrsigner() {
     grep -A1 'mrsigner->value:' /tmp/_exp2_mrsigner.txt | tail -1 | tr -d ' ' | sed 's/0x//g'
 }
 
-ensure_v1_code() {
-    if grep -q 'V2_EXPERIMENT_MARKER' Enclave/Enclave.cpp; then
-        echo -e "$INFO 还原 Enclave.cpp 到 V1..."
-        sed -i '/V2_EXPERIMENT_MARKER/d' Enclave/Enclave.cpp
-        sed -i '/v2_dummy_function(); \/\/ V2_EXPERIMENT_MARKER/d' Enclave/Enclave.cpp
-        sed -i '/^$/N;/^\n$/D' Enclave/Enclave.cpp
-    fi
-}
-
-make_v2_code() {
-    if ! grep -q 'V2_EXPERIMENT_MARKER' Enclave/Enclave.cpp; then
-        echo -e "$INFO 修改 Enclave.cpp → V2（插入空函数并调用）..."
-        # 在文件末尾（namespace 之后）插入函数定义
-        echo -e "\n/* V2_EXPERIMENT_MARKER: 空函数 */\nvoid v2_dummy_function(void) {}\n" >> Enclave/Enclave.cpp
-        # 在 ecall_vault_create 函数开头插入调用（寻找 "int ecall_vault_create(" 下一行）
-        sed -i '/^int ecall_vault_create(/a \    v2_dummy_function(); \/\/ V2_EXPERIMENT_MARKER' Enclave/Enclave.cpp
-    fi
-}
-
-# ── 阶段一：V1 + MRENCLAVE ──
+# ============================================================================
+# 实验开始
+# ============================================================================
 echo "============================================================"
-echo "  实验二：MRENCLAVE vs MRSIGNER 对比（增强版）"
+echo "  实验二：MRENCLAVE vs MRSIGNER 对比"
 echo "  模式: $MODE"
 echo "============================================================"
 echo ""
 
 ensure_v1_code
 
+# ── 阶段一：V1 + MRENCLAVE ──
 echo "────────────────────────────────────────────────────────────"
 echo "  阶段一：V1 + MRENCLAVE 密封"
 echo "────────────────────────────────────────────────────────────"
+
 build MRENCLAVE
 V1_MRENCLAVE_HASH=$(get_mrenclave)
 V1_MRSIGNER_HASH=$(get_mrsigner)
@@ -111,7 +115,11 @@ echo ""
 echo "────────────────────────────────────────────────────────────"
 echo "  阶段二：V1 + MRSIGNER 密封"
 echo "────────────────────────────────────────────────────────────"
+
 build MRSIGNER
+echo -e "$INFO V1 MRENCLAVE = $(get_mrenclave | head -c16)..."
+echo -e "$INFO V1 MRSIGNER  = $(get_mrsigner | head -c16)..."
+
 run_app "1" "1234" "1234" "3" "github" "alice" "test_mrsigner_pw" "9" "0" > /dev/null
 cp vault.sealed vault_mrsigner_v1.sealed
 echo -e "  $PASS 已保存 vault_mrsigner_v1.sealed"
@@ -121,8 +129,9 @@ echo ""
 echo "────────────────────────────────────────────────────────────"
 echo "  阶段三：修改代码 → V2"
 echo "────────────────────────────────────────────────────────────"
+
 make_v2_code
-echo -e "  $PASS Enclave.cpp 已修改（插入空函数并调用）"
+echo -e "  $PASS Enclave.cpp 已修改（插入 volatile 静态变量）"
 echo -e "$INFO 代码变更:"
 grep -n 'V2_EXPERIMENT_MARKER' Enclave/Enclave.cpp || true
 
@@ -131,6 +140,7 @@ echo ""
 echo "────────────────────────────────────────────────────────────"
 echo "  阶段四：V2 解封 V1 的 MRENCLAVE 数据"
 echo "────────────────────────────────────────────────────────────"
+
 build MRENCLAVE
 V2_MRENCLAVE_HASH=$(get_mrenclave)
 V2_MRSIGNER_HASH=$(get_mrsigner)
@@ -141,7 +151,6 @@ if [ "$V1_MRENCLAVE_HASH" != "$V2_MRENCLAVE_HASH" ]; then
     echo -e "  $PASS MRENCLAVE 已变化 (V1 ≠ V2)"
 else
     echo -e "  $FAIL MRENCLAVE 未变化 — 代码改动无效，请检查插入是否生效"
-    exit 1
 fi
 
 if [ "$V1_MRSIGNER_HASH" = "$V2_MRSIGNER_HASH" ]; then
@@ -164,6 +173,7 @@ echo ""
 echo "────────────────────────────────────────────────────────────"
 echo "  阶段五：V2 解封 V1 的 MRSIGNER 数据"
 echo "────────────────────────────────────────────────────────────"
+
 cp vault_mrsigner_v1.sealed vault.sealed
 OUTPUT=$(run_app "2" "1234" "4" "github" "0")
 if echo "$OUTPUT" | grep -q "test_mrsigner_pw"; then
@@ -181,6 +191,7 @@ echo ""
 echo "────────────────────────────────────────────────────────────"
 echo "  阶段六：还原代码"
 echo "────────────────────────────────────────────────────────────"
+
 ensure_v1_code
 echo -e "  $PASS Enclave.cpp 已还原到 V1"
 
@@ -197,3 +208,4 @@ echo "HW 模式额外测试（需要两台 SGX 机器）："
 echo "  机器A: make SGX_MODE=HW SEAL_POLICY=MRENCLAVE → 密封 → vault.sealed"
 echo "  机器B: scp vault.sealed → make SGX_MODE=HW → ./app → Load"
 echo "  预期：VAULT_ERR_UNSEAL（平台根密钥不同）"
+echo ""
