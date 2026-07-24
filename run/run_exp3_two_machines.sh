@@ -34,16 +34,18 @@ for command_name in python3 hostname; do
     fi
 done
 
-LOCAL_IPS="$(hostname -I 2>/dev/null | xargs || true)"
-echo "实验 3 双机一键运行器 / Exp3 Two-machine One-click Runner"
-echo "主机名/Hostname : $HOST_NAME"
-echo "本机 IP/Local IP: ${LOCAL_IPS:-unavailable}"
-echo
 read -r -p "选择本机角色 / Select role (A = SGX client, B = witness server): " ROLE
 ROLE="${ROLE^^}"
+LOCAL_IPS="$(hostname -I 2>/dev/null | xargs || true)"
 
 case "$ROLE" in
     A)
+        echo
+        echo "SGX 回滚攻击与远程见证防护 / SGX Rollback Attack and Remote-witness Defense"
+        echo "[身份/ROLE] 机器 A：SGX 客户端 / Machine A: SGX client"
+        echo "[主机/HOST] $HOST_NAME"
+        echo "[本机 IP/LOCAL IP] ${LOCAL_IPS:-unavailable}"
+
         if [[ ! -e /dev/sgx_enclave ]]; then
             echo "[致命错误/FATAL] 角色 A 需要 /dev/sgx_enclave / Role A requires SGX hardware." >&2
             exit 1
@@ -120,6 +122,12 @@ PY
         ;;
 
     B)
+        echo
+        echo "远程见证回滚防护服务器 / Remote-witness Rollback-defense Server"
+        echo "[身份/ROLE] 机器 B：见证服务器 / Machine B: witness server"
+        echo "[主机/HOST] $HOST_NAME"
+        echo "[本机 IP/LOCAL IP] ${LOCAL_IPS:-unavailable}"
+
         BROADCAST_PID=""
         cleanup() {
             if [[ -n "$BROADCAST_PID" ]]; then
