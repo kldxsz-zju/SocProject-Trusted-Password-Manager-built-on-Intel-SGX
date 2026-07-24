@@ -187,13 +187,13 @@ show_menu() {
     echo "模式/Mode       : $MODE"
     echo "日志/Logs       : $LOG_DIR"
     echo
-    printf "${GREEN}  1) Test 1 - 密封数据机密性与完整性防御 / Sealed-data confidentiality and integrity defense${NC}\n"
-    printf "${RED}  2) Test 2 - PIN 暴力破解与回滚攻击 / PIN brute-force and rollback attacks${NC}\n"
-    printf "${RED}  3) Test 3 - 时间侧信道攻击 / Timing side-channel attack${NC}\n"
+    printf "${GREEN}  1) 密封数据机密性与完整性防御 / Sealed-data confidentiality and integrity defense${NC}\n"
+    printf "${RED}  2) PIN 暴力破解攻击 / PIN brute-force attack${NC}\n"
+    printf "${RED}  3) 时间侧信道攻击 / Timing side-channel attack${NC}\n"
     printf "${GREEN}  4) 侧信道防护测试 / Side-channel defense test${NC}\n"
-    printf "${GREEN}  5) Exp2   - MRENCLAVE 与 MRSIGNER 密封策略防御对比 / Sealing-policy defense comparison${NC}\n"
-    printf "${RED}  6) Exp3   - 单机无防护硬件回滚攻击 / Single-machine unprotected HW rollback attack${NC}\n"
-    printf "${GREEN}  7) Exp3   - 单机远程见证回滚防护 / Single-machine witness rollback defense${NC}\n"
+    printf "${GREEN}  5) MRENCLAVE 与 MRSIGNER 密封策略防御对比 / MRENCLAVE vs MRSIGNER defense comparison${NC}\n"
+    printf "${RED}  6) 单机无防护硬件回滚攻击 / Single-machine unprotected HW rollback attack${NC}\n"
+    printf "${GREEN}  7) 单机见证回滚防护 / Single-machine witness rollback defense${NC}\n"
     printf "${CYAN}  8) 展示 Web 前端 / Show the web frontend${NC}\n"
     printf "${YELLOW}  0) 退出 / Exit${NC}\n"
     echo
@@ -206,7 +206,7 @@ while true; do
     case "$choice" in
         1)
             show_stage "$GREEN" "防御测试/DEFENSE TEST" \
-                "Test 1 - Sealed-data confidentiality and integrity" \
+                "Sealed-data Confidentiality and Integrity Defense" \
                 "检查密封文件是否泄露明文，并通过篡改密封数据验证完整性防御。" \
                 "Check for plaintext leakage and verify integrity protection by tampering with sealed data."
             run_python_test "test1.py" "test1.log"
@@ -214,15 +214,15 @@ while true; do
             ;;
         2)
             show_stage "$RED" "攻击测试/ATTACK TEST" \
-                "Test 2 - Brute-force and rollback attacks" \
-                "执行 PIN 暴力破解和旧版密封文件回滚攻击，观察系统的攻击面。" \
-                "Run PIN brute-force and old sealed-file rollback attacks to observe the attack surface."
+                "PIN Brute-force Attack" \
+                "枚举候选 PIN 并反复尝试登录，验证密码库是否容易受到暴力破解攻击。" \
+                "Enumerate candidate PINs and repeatedly attempt login to test susceptibility to brute-force attacks."
             run_python_test "test2.py" "test2.log"
             pause_for_menu
             ;;
         3)
             show_stage "$RED" "攻击测试/ATTACK TEST" \
-                "Test 3 - Timing side-channel attack" \
+                "Timing Side-channel Attack" \
                 "测量不同 PIN 的登录响应时间，判断是否存在可区分的时间侧信道。" \
                 "Measure login times for different PINs to detect a distinguishable timing side channel."
             run_python_test "test3.py" "test3.log"
@@ -239,7 +239,7 @@ while true; do
             ;;
         5)
             show_stage "$GREEN" "防御测试/DEFENSE TEST" \
-                "Experiment 2 - MRENCLAVE vs MRSIGNER ($MODE)" \
+                "MRENCLAVE vs MRSIGNER Sealing-policy Defense Comparison ($MODE)" \
                 "对比 MRENCLAVE 与 MRSIGNER 密封策略在代码升级后的数据解封行为。" \
                 "Compare how MRENCLAVE and MRSIGNER sealing policies behave after a code upgrade."
             run_logged "exp2.log" \
@@ -248,7 +248,7 @@ while true; do
             ;;
         6)
             show_stage "$RED" "攻击测试/ATTACK TEST" \
-                "Experiment 3 - Single-machine unprotected HW rollback" \
+                "Single-machine Unprotected HW Rollback Attack" \
                 "在真实 SGX 硬件上回放合法旧密封文件，演示无远程见证时的回滚攻击。" \
                 "Replay a valid old sealed file on real SGX hardware to demonstrate rollback without a remote witness."
             if [[ -e /dev/sgx_enclave ]]; then
@@ -261,7 +261,7 @@ while true; do
             ;;
         7)
             show_stage "$GREEN" "防御测试/DEFENSE TEST" \
-                "Experiment 3 - Local Witness Rollback Defense" \
+                "Single-machine Witness Rollback Defense" \
                 "在本机启动独立版本见证服务，回放旧密封文件并验证读取密码前拒绝回滚。" \
                 "Start a local version witness, replay an old sealed file, and verify rollback rejection before password access."
             if [[ -e /dev/sgx_enclave ]]; then
