@@ -3,6 +3,7 @@
 
 """
 SGX Password Vault - Attack Tests
+包括：暴力破解、回滚、克隆、侧信道
 """
 
 import os
@@ -16,6 +17,7 @@ import threading
 import queue
 import pexpect
 import time
+import re
 from collections import Counter
 
 APP_PATH = "./app"
@@ -30,13 +32,12 @@ USERNAME_1 = "testuser1"
 PASSWORD_1 = "testpass123"
 VAULTPASSWORD = "1234"
 
-def send_commands(proc, commands, timeout=TIMEOUT):
+def send_commands(proc, commands, output, timeout=TIMEOUT):
     """
     启动应用程序，依次发送命令（列表），并捕获所有输出。
     每个命令应包含换行符。
     返回程序的标准输出字符串。
     """
-    output = ""
     # 发送所有命令
     for cmd in commands:
         # 读取输出直到出现 "Choice:" 提示（或程序退出）
@@ -63,7 +64,6 @@ def send_commands(proc, commands, timeout=TIMEOUT):
         if not chunk:
             break
         output += chunk
-    proc.stdin.flush()
     # print(output);
     # print("\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n")
     return output
@@ -84,7 +84,7 @@ def test_bruteforce():
     brute_commands = ['2\n'];
     found = False
     common_pins = [f"{i:04d}" for i in range(1000,2000)]
-
+    output = ""
     attempts = 0
     for guess in common_pins:
         attempts += 1
@@ -92,92 +92,19 @@ def test_bruteforce():
         brute_commands.append('a\n')
         brute_commands.append('a\n')
         # print(brute_commands)
-        output = send_commands(proc,brute_commands)
+        output = send_commands(proc,brute_commands,output)
         brute_commands.pop()
         brute_commands.pop()
         brute_commands.pop()
         if "Login successful." in output:
             found  = True
             break
-    send_commands(proc,'0\n')
+    send_commands(proc,'0\n',output)
     if not found:
         print("\n[-] 暴力破解失败，共尝试 {} 次".format(attempts))
     else:
         print("\n[+] 暴力破解成功，密码为 {}".format(guess))
 
-
-def test_sidechannel_pagefault():
-    """侧信道：页错误模式分析"""
-    print("[*] 侧信道（页错误）测试")
-    # 创建vault，添加多个服务
-
-    proc1 = subprocess.Popen(
-        [APP_PATH],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
-    )
-
-    commands = [
-            '2\n',
-            '1234\n'
-        ]
-
-    send_commands(proc1,commands)
-    # if"Error:" in out:
-    #     print("加载失败")
-    # else:
-    #     print("加载成功！")
-    
-    services = ["s1", "s2", "s3", "s4"]
-    for s in services:
-        commands = [
-                '3\n',
-                s, 
-                s+"user", 
-                s+"pass"
-            ]
-        out = send_commands(proc1,commands)
-        # if"Error:" in out:
-        #     print("添加密码失败")
-        # if'OK' in out:
-        #     print("添加成功")   
-
-    commands = ['9\n', '0\n']
-    out = send_commands(proc1,commands)
-    proc1.wait(timeout=TIMEOUT)
-    # if"Error:" in out:
-    #     print("保存失败")
-    # 加载并解锁
-    # proc2 = subprocess.Popen(
-    #     [APP_PATH],
-    #     stdin=subprocess.PIPE,
-    #     stdout=subprocess.PIPE,
-    #     stderr=subprocess.STDOUT,
-    #     text=True,
-    #     bufsize=1
-    # )
-    # commands = [
-    #     '2\n',
-    #     '1234\n'
-    # ]
-    # out = send_commands(proc2,commands)
-    # if "Error:" in out:
-    #     print("加载失败")
-    #     return
-    # time.sleep(1)
-    # # 获取每个服务
-    # for s in services:
-    #     result1 = subprocess.run(["perf probe 'sgx_encl_page_alloc%return ret=$retval'"], capture_output=True, text=True)
-    #     proc2.stdin.write('4\n' + s + '\n')
-    #     result2 = subprocess.run(["perf probe 'sgx_encl_page_alloc%return ret=$retval'"], capture_output=True, text=True)
-    #     pagefault_count = result2 - result1
-    #     print("[*] 页错误数据:", pagefault_count)
-    #     time.sleep(0.5)
-    # proc2.stdin.write('0\n')
-    # proc2.stdin.flush()
 
 def main():
     print("=== SGX密码库攻击测试 ===")
@@ -210,14 +137,15 @@ def main():
             '9\n',                # Save
             '0\n'
         ]
-    output = send_commands(proc,init_commands)
+    output = ""
+    output = send_commands(proc,init_commands,output)
     proc.wait(timeout=TIMEOUT)
     if "Error" in output or not os.path.exists(SEALED_FILE):
         print("初始化失败，请检查应用程序。")
         print(output)
         sys.exit(1)
     print("✓ 密码库创建并保存成功。\n")
-
+    output = ""
     proc = subprocess.Popen(
         [APP_PATH],
         stdin=subprocess.PIPE,
@@ -231,11 +159,10 @@ def main():
             '1234\n',
             '0\n'
         ]
-    send_commands(proc,commands)
+    output = send_commands(proc,commands,output)
 
     #创建密码库
     test_bruteforce()
-    # test_sidechannel_pagefault()
 
 if __name__ == "__main__":
     main()
